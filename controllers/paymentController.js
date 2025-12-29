@@ -279,7 +279,7 @@ const confirmTestPayment = async (req, res) => {
             }
         }
 
-        // Send Thank You Email to Donor
+        // Send Thank You Email to Donor (Asynchronously for test mode to avoid hang on timeout)
         try {
             const donor = await User.findById(donorId);
             
@@ -307,14 +307,15 @@ const confirmTestPayment = async (req, res) => {
                     </div>
                 `;
 
-                await sendEmail({
+                // Sending without await to avoid blocking the response on SMTP timeout
+                sendEmail({
                     email: donor.email,
                     subject: "[TEST] Thank You for Your Generous Donation! - Swiflare NGO",
                     html: emailHtml
-                });
+                }).catch(err => console.error("Background Email Error (Test Mode):", err.message));
             }
         } catch (emailErr) {
-            console.error("Failed to send thank you email:", emailErr);
+            console.error("Failed to initiate background thank you email:", emailErr);
         }
 
         res.status(200).json({ message: "Test payment confirmed successfully", success: true });
