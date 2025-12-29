@@ -34,7 +34,7 @@ app.use(cors(corsOptions));
 
 // --- Middleware ---
 // Special handling for Stripe Webhook (must be before express.json)
-app.use("/payment/webhook", express.raw({ type: "application/json" }), require("./controllers/paymentController").handleWebhook);
+// app.use("/payment/webhook", express.raw({ type: "application/json" }), require("./controllers/paymentController").handleWebhook);
 
 app.use(express.json());
 

@@ -1,4 +1,4 @@
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+// const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const Donation = require("../models/Donation");
 const DonationRequest = require("../models/DonationRequest");
 const Notification = require("../models/Notification");
@@ -42,6 +42,7 @@ const createPaymentIntent = async (req, res) => {
     // Get donor information for Indian regulations
     const donor = await User.findById(donorId);
     
+    /*
     // Create PaymentIntent
     const paymentIntent = await stripe.paymentIntents.create({
       amount: stripeAmount,
@@ -68,12 +69,20 @@ const createPaymentIntent = async (req, res) => {
       clientSecret: paymentIntent.client_secret,
       donationId: donation._id,
     });
+    */
+
+    // DUMMY RESPONSE FOR TESTING
+    res.status(200).json({
+      clientSecret: `test_secret_${donation._id}`,
+      donationId: donation._id,
+    });
   } catch (error) {
     console.error("Create Payment Intent Error:", error);
     res.status(500).json({ message: "Failed to initialize payment" });
   }
 };
 
+/*
 // @desc    Handle Stripe Webhooks
 // @route   POST /payment/webhook
 // @access  Public
@@ -206,8 +215,117 @@ const handleWebhook = async (req, res) => {
 
     res.json({ received: true });
 };
+*/
+
+// @desc    Confirm Test Payment (Manual simulation of success)
+// @route   POST /payment/confirm-test-payment
+// @access  Private
+const confirmTestPayment = async (req, res) => {
+    try {
+        const { donationId } = req.body;
+        const donorId = req.user._id;
+
+        const donation = await Donation.findById(donationId);
+        if (!donation) {
+            return res.status(404).json({ message: "Donation record not found" });
+        }
+
+        if (donation.status === 'success') {
+            return res.status(200).json({ message: "Payment already confirmed", success: true });
+        }
+
+        // Perform conversion if it's not INR
+        let convertedAmountINR = donation.originalAmount;
+        let currentRate = 1;
+
+        if (donation.currency === "USD") {
+            const axios = require("axios");
+            try {
+                const response = await axios.get('https://api.frankfurter.app/latest?from=USD&to=INR');
+                currentRate = response.data?.rates?.INR || 83.50;
+                convertedAmountINR = donation.originalAmount * currentRate;
+            } catch (error) {
+                currentRate = 83.50;
+                convertedAmountINR = donation.originalAmount * currentRate;
+            }
+        }
+
+        // Update donation record
+        donation.status = "success";
+        donation.transactionId = `TEST-${Date.now()}`;
+        donation.amount = convertedAmountINR;
+        donation.exchangeRate = currentRate;
+        await donation.save();
+
+        // Update Donation Request and check goal
+        const donationRequest = await DonationRequest.findById(donation.requestId);
+        if (donationRequest) {
+            const successfulDonations = await Donation.find({ requestId: donation.requestId, status: "success" });
+            const totalRaised = successfulDonations.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+            
+            const rawGoal = donationRequest.donationamount?.toString() || "0";
+            const goalAmount = parseFloat(rawGoal.replace(/[^0-9.]/g, ''));
+
+            if (!isNaN(goalAmount) && goalAmount > 0 && totalRaised >= goalAmount) {
+                donationRequest.status = "achieved";
+                await donationRequest.save();
+
+                await Notification.create({
+                    type: "goal_achieved",
+                    message: `Goal Achieved: The mission for ${donationRequest.patientname} has been fully funded!`,
+                    relatedId: donationRequest._id,
+                    onModel: "DonationRequest"
+                });
+            }
+        }
+
+        // Send Thank You Email to Donor
+        try {
+            const donor = await User.findById(donorId);
+            
+            if (donor && donor.email) {
+                const emailHtml = `
+                    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 40px; border: 1px solid #f0f0f0; border-radius: 20px;">
+                        <div style="text-align: center; margin-bottom: 30px;">
+                            <div style="display: inline-block; padding: 20px; background-color: #4D9186; border-radius: 20px;">
+                                <h1 style="color: white; margin: 0; font-size: 24px;">SWIFLARE NGO [TEST MODE]</h1>
+                            </div>
+                        </div>
+                        
+                        <h2 style="color: #333; text-align: center; font-size: 28px; margin-bottom: 10px;">Glorious Impact!</h2>
+                        <p style="color: #666; text-align: center; font-size: 16px; margin-bottom: 30px;">Your [TEST] generosity has been successfully received.</p>
+                        
+                        <div style="background-color: #f9f9f9; padding: 30px; border-radius: 20px; margin-bottom: 30px;">
+                            <p style="margin: 0 0 10px 0; color: #999; text-transform: uppercase; font-size: 12px; font-weight: bold; letter-spacing: 1px;">Donation Summary</p>
+                            <h3 style="margin: 0; color: #333; font-size: 20px;">${donation.currency} ${donation.originalAmount}</h3>
+                        </div>
+                        
+                        <p style="color: #666; line-height: 1.6; font-size: 15px;">
+                            Hi ${donor.username},<br><br>
+                            This is a test payment confirmation. Together, we make a difference.
+                        </p>
+                    </div>
+                `;
+
+                await sendEmail({
+                    email: donor.email,
+                    subject: "[TEST] Thank You for Your Generous Donation! - Swiflare NGO",
+                    html: emailHtml
+                });
+            }
+        } catch (emailErr) {
+            console.error("Failed to send thank you email:", emailErr);
+        }
+
+        res.status(200).json({ message: "Test payment confirmed successfully", success: true });
+    } catch (error) {
+        console.error("Confirm Test Payment Error:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
 
 module.exports = {
   createPaymentIntent,
   handleWebhook,
+  confirmTestPayment,
 };
