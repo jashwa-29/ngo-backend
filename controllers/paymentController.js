@@ -326,6 +326,6 @@ const confirmTestPayment = async (req, res) => {
 
 module.exports = {
   createPaymentIntent,
-  handleWebhook,
+  // handleWebhook,
   confirmTestPayment,
 };
